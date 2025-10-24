@@ -103,7 +103,7 @@ def rdm_mo2ao(rdm: np.ndarray, mo_coeff: np.ndarray):
 def canonical_mo_coeff(mo_coeff: np.ndarray):
     # make the first large element positive
     # all elements smaller than 1e-5 is highly unlikely (at least 1e10 basis)
-    largest_elem_idx = np.argmax(1e-5 < np.abs(mo_coeff), axis=0)
+    largest_elem_idx = np.argmax(np.where(1e-5 < np.abs(mo_coeff),mo_coeff,0), axis=0)
     largest_elem = mo_coeff[(largest_elem_idx, np.arange(len(largest_elem_idx)))]
     return mo_coeff * np.sign(largest_elem).reshape(1, -1)
 
