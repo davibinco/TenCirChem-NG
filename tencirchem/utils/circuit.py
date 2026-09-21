@@ -78,45 +78,43 @@ def evolve_pauli(circuit: tc.Circuit, pauli_string: Tuple, theta: float):
     return circuit
 
 
-def multicontrol_ry(theta):
-    # https://arxiv.org/pdf/2005.14475.pdf
-    c = tc.Circuit(4)
-    i, j, k, l = 0, 1, 2, 3
+def multicontrol_ry(theta, ctrl=(0, 1, 0)):
+    # ancilla-free multicontrolled Ry, generalized to an arbitrary number of controls
+    # https://arxiv.org/pdf/2005.14475.pdf, see also
+    # https://github.com/tequilahub/tequila/blob/master/src/tequila/quantumchemistry/chemistry_tools.py
+    n_ctrl = len(ctrl)
+    c = tc.Circuit(n_ctrl + 1)
+    controls = list(range(n_ctrl))
+    target = n_ctrl
 
-    c.x(i)
-    c.x(k)
+    # controls with ctrl == 0 are flipped so that the recursive construction below,
+    # which always controls on |1>, implements the requested 0/1 pattern
+    flipped = [q for q, b in zip(controls, ctrl) if b == 0]
+    for q in flipped:
+        c.x(q)
 
-    c.ry(l, theta=theta / 8)
-    c.h(k)
-    c.cnot(l, k)
+    def cry_recursive(dcontrol, angle, case):
+        if not dcontrol:
+            c.ry(target, theta=angle)
+            return
+        aux, rest = dcontrol[0], dcontrol[1:]
+        if case:
+            cry_recursive(rest, angle / 2, True)
+            c.h(aux)
+            c.cnot(target, aux)
+            cry_recursive(rest, -angle / 2, False)
+            c.cnot(target, aux)
+            c.h(aux)
+        else:
+            c.h(aux)
+            c.cnot(target, aux)
+            cry_recursive(rest, -angle / 2, False)
+            c.cnot(target, aux)
+            c.h(aux)
+            cry_recursive(rest, angle / 2, True)
 
-    c.ry(l, theta=-theta / 8)
-    c.h(i)
-    c.cnot(l, i)
+    cry_recursive(controls, theta, True)
 
-    c.ry(l, theta=theta / 8)
-    c.cnot(l, k)
-
-    c.ry(l, theta=-theta / 8)
-    c.h(j)
-    c.cnot(l, j)
-
-    c.ry(l, theta=theta / 8)
-    c.cnot(l, k)
-
-    c.ry(l, theta=-theta / 8)
-    c.cnot(l, i)
-
-    c.ry(l, theta=theta / 8)
-    c.h(i)
-    c.cnot(l, k)
-
-    # there's a typo in the paper
-    c.ry(l, theta=-theta / 8)
-    c.h(k)
-    c.cnot(l, j)
-    c.h(j)
-
-    c.x(i)
-    c.x(k)
+    for q in flipped:
+        c.x(q)
     return c

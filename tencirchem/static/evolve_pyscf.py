@@ -37,7 +37,6 @@ class CIvectorPySCF:
         else:
             cre = cre_b
             n_elec_b += 1
-
         new_civector = cre(self.civector, self.n_orb, (self.n_elec_a, self.n_elec_b), i % self.n_orb)
         return CIvectorPySCF(new_civector, self.n_orb, n_elec_a, n_elec_b)
 
@@ -49,42 +48,43 @@ class CIvectorPySCF:
         else:
             des = des_b
             n_elec_b -= 1
-
         new_civector = des(self.civector, self.n_orb, (self.n_elec_a, self.n_elec_b), i % self.n_orb)
         return CIvectorPySCF(new_civector, self.n_orb, n_elec_a, n_elec_b)
 
-    def pq(self, p, q):
-        return self.des(q).cre(p)
+def apply_t_pyscf(civector: "CIvectorPySCF", ex_op) -> "CIvectorPySCF":
+    """
+    Apply T = a^dagger_{p_1} ... a^dagger_{p_k} a_{q_k} ... a_{q_1} to ``civector``,
+    where ``ex_op = (p_1, ..., p_k, q_1, ..., q_k)``. Generalizes the former
+    ``pq``/``pqrs`` methods to excitation operators of arbitrary rank k
+    (singles, doubles, triples, ...).
+    """
+    assert len(ex_op) % 2 == 0
+    k = len(ex_op) // 2
+    creates, destroys = ex_op[:k], ex_op[k:]
+    v = civector
+    for q in reversed(destroys):
+        v = v.des(q)
+    for p in reversed(creates):
+        v = v.cre(p)
+    return v
 
-    def pqqp(self, p, q):
-        return self.des(p).cre(q).des(q).cre(p)
 
-    def pqrs(self, p, q, r, s):
-        return self.des(s).des(r).cre(q).cre(p)
-
-    def pqrssrqp(self, p, q, r, s):
-        return self.des(p).des(q).cre(r).cre(s).des(s).des(r).cre(q).cre(p)
+def apply_ttdagger_pyscf(civector: "CIvectorPySCF", ex_op) -> "CIvectorPySCF":
+    """Apply T T^dagger to ``civector``. Generalizes the former ``pqqp``/``pqrssrqp`` methods."""
+    v = apply_t_pyscf(civector, tuple(reversed(ex_op)))
+    v = apply_t_pyscf(v, ex_op)
+    return v
 
 
 def apply_a2_pyscf(civector: CIvectorPySCF, ex_op) -> Tensor:
-    if len(ex_op) == 2:
-        apply_f = civector.pqqp
-    else:
-        assert len(ex_op) == 4
-        apply_f = civector.pqrssrqp
-    civector1 = apply_f(*ex_op)
-    civector2 = apply_f(*reversed(ex_op))
+    civector1 = apply_ttdagger_pyscf(civector, ex_op)
+    civector2 = apply_ttdagger_pyscf(civector, tuple(reversed(ex_op)))
     return -civector1.civector - civector2.civector
 
 
 def apply_a_pyscf(civector: CIvectorPySCF, ex_op) -> Tensor:
-    if len(ex_op) == 2:
-        apply_func = civector.pq
-    else:
-        assert len(ex_op) == 4
-        apply_func = civector.pqrs
-    civector1 = apply_func(*ex_op)
-    civector2 = apply_func(*reversed(ex_op))
+    civector1 = apply_t_pyscf(civector, ex_op)
+    civector2 = apply_t_pyscf(civector, tuple(reversed(ex_op)))
     return civector1.civector - civector2.civector
 
 
@@ -101,7 +101,6 @@ def get_civector_pyscf(params, n_qubits, n_elec_s, ex_ops, param_ids, mode="ferm
     n_orb = n_qubits // 2
     na, nb = unpack_nelec(n_elec_s)
     num_strings = cistring.num_strings(n_orb, na) * cistring.num_strings(n_orb, nb)
-
     if init_state is None:
         civector = get_init_civector(num_strings)
     else:

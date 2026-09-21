@@ -48,33 +48,49 @@ def evolve_excitation(circuit: tc.Circuit, f_idx: tuple, qop, theta, mode: str, 
             for ii in reversed(range(len(z_indices) - 1)):
                 circuit.CNOT(z_indices[ii], z_indices[ii + 1])
 
-    if len(f_idx) == 2:
-        k, l = f_idx
+    assert len(f_idx) % 2 == 0
+    n = len(f_idx) // 2
+    creates, destroys = list(f_idx[:n]), list(f_idx[n:])
+
+    if n == 1:
+        k, l = creates[0], destroys[0]
         circuit.CNOT(k, l)
         parity_gates(k)
         circuit.cry(l, k, theta=theta)
         parity_gates(k, reverse=True)
         circuit.CNOT(k, l)
+        return circuit
+
+    # entangle the creation indices among themselves and the annihilation indices among themselves,
+    # then link the two chains through their last (target) qubits
+    for ii in range(n - 1):
+        circuit.CNOT(destroys[ii + 1], destroys[ii])
+        circuit.CNOT(creates[ii + 1], creates[ii])
+    target = creates[-1]
+    circuit.CNOT(target, destroys[-1])
+
+    parity_gates(target)
+
+    # https://arxiv.org/pdf/2005.14475.pdf, generalized to n-fold excitations following
+    # https://github.com/tequilahub/tequila/blob/master/src/tequila/quantumchemistry/chemistry_tools.py
+    controls = destroys + creates[:-1]
+    ctrl = [0] * (n - 1) + [1] + [0] * (n - 1)
+    if not decompose_multicontrol:
+        try:
+            name = f"Ry({theta:.4f})"
+        except TypeError:
+            # jax tracer can't be formatted
+            name = "Ry"
+        circuit.multicontrol(*controls, target, ctrl=ctrl, unitary=tc.gates.ry_gate(theta).tensor, name=name)
     else:
-        assert len(f_idx) == 4
-        k, l, i, j = f_idx
-        circuit.CNOT(l, k)
-        circuit.CNOT(j, i)
-        circuit.CNOT(l, j)
-        parity_gates(l)
-        if not decompose_multicontrol:
-            try:
-                name = f"Ry({theta:.4f})"
-            except TypeError:
-                # jax tracer can't be formatted
-                name = "Ry"
-            circuit.multicontrol(i, j, k, l, ctrl=[0, 1, 0], unitary=tc.gates.ry_gate(theta).tensor, name=name)
-        else:
-            circuit.append(multicontrol_ry(theta), indices=[i, j, k, l])
-        parity_gates(l, reverse=True)
-        circuit.CNOT(l, j)
-        circuit.CNOT(j, i)
-        circuit.CNOT(l, k)
+        circuit.append(multicontrol_ry(theta, ctrl=ctrl), indices=controls + [target])
+
+    parity_gates(target, reverse=True)
+
+    circuit.CNOT(target, destroys[-1])
+    for ii in reversed(range(n - 1)):
+        circuit.CNOT(creates[ii + 1], creates[ii])
+        circuit.CNOT(destroys[ii + 1], destroys[ii])
 
     return circuit
 
